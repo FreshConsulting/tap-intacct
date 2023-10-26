@@ -2,6 +2,7 @@ import backoff
 import boto3
 import re
 import singer
+from botocore.client import Config
 
 from botocore.credentials import (
     AssumeRoleCredentialFetcher,
@@ -45,8 +46,6 @@ class AssumeRoleProvider():
             self.METHOD
         )
 
-
-
 @retry_pattern()
 def setup_aws_client(config):
     role_arn = "arn:aws:iam::{}:role/{}".format(config['account_id'].replace('-', ''),
@@ -84,8 +83,10 @@ def get_exported_tables(bucket, company_id, path=None):
     return exported_tables
 
 def list_files_in_bucket(bucket, search_prefix=None):
-    s3_client = boto3.client('s3')
-
+    #LOGGER.info("Entre al List Files: lo que sigue es el S3 CLIENT")
+    config = Config(connect_timeout=15, retries={'max_attempts': 10}) #Ese modo es lo nuevo que no se ha probado
+    s3_client = boto3.client('s3',config=config)
+    #LOGGER.info(s3_client)
     s3_objects = []
 
     max_results = 1000
@@ -99,27 +100,39 @@ def list_files_in_bucket(bucket, search_prefix=None):
 
     result = s3_client.list_objects_v2(**args)
 
+    #LOGGER.info(result.get('NextContinuationToken'))
+    #LOGGER.info(result['KeyCount'])
     next_continuation_token = None
     if result['KeyCount'] > 0:
         s3_objects += result['Contents']
-        next_continuation_token = result.get('NextContinuationToken')
+        next_continuation_token = result.get('NextContinuationToken') 
+        #LOGGER.info('Mira que Cool')
+        #LOGGER.info(result.get('NextContinuationToken') )
 
+    #LOGGER.info(next_continuation_token)
+    
     while next_continuation_token is not None:
-        LOGGER.info('Continuing pagination with token "%s".', next_continuation_token)
-
+        #LOGGER.info('ESTOY EN EL WHILE')
+        #LOGGER.info('Continuing pagination with token "%s".', next_continuation_token)
+        
         continuation_args = args.copy()
+        
         continuation_args['ContinuationToken'] = next_continuation_token
 
         result = s3_client.list_objects_v2(**continuation_args)
 
         s3_objects += result['Contents']
         next_continuation_token = result.get('NextContinuationToken')
+        #LOGGER.info('AQUI ESTOY AL FINAL DEL WHILE', next_continuation_token)
+        
 
+    #LOGGER.info(s3_objects)
     if s3_objects:
         LOGGER.info("Found %s files.", len(s3_objects))
     else:
         LOGGER.warning('Found no files for bucket "%s" that match prefix "%s"', bucket, search_prefix)
 
+    #LOGGER.info(s3_objects)
     return s3_objects
 
 def get_sampled_schema_for_table(config, table_name):
@@ -226,7 +239,6 @@ def sample_file(config, table_name, s3_path, sample_rate, max_records):
 
     return samples
 
-
 # pylint: disable=too-many-arguments
 def sample_files(config, table_name, s3_files,
                  sample_rate=5, max_records=1000, max_files=5):
@@ -246,9 +258,12 @@ def sample_files(config, table_name, s3_files,
     return to_return
 
 def get_file_handle(config, s3_path):
+    
     bucket = config['bucket']
     s3_client = boto3.resource('s3')
 
     s3_bucket = s3_client.Bucket(bucket)
     s3_object = s3_bucket.Object(s3_path)
-    return s3_object.get()['Body']
+    #Ojo con eso obtengo la info del csv como string 
+    #LOGGER.info('AQUI ESTA EL BODY', s3_object.get()['Body'].read().decode())
+    return s3_object.get()['Body'] #Devuelve la info pero en binario 

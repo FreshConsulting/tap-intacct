@@ -1,3 +1,4 @@
+import json
 from singer import metadata, utils, Transformer
 
 import singer
@@ -24,8 +25,10 @@ def sync_stream(config, state, stream):
 
     for s3_file in s3_files:
         records_streamed += sync_table_file(config, s3_file['key'], stream)
-
+        LOGGER.info('################ ESTE ES EL QUE IMPORTA ##############')
         state = singer.write_bookmark(state, table_name, 'modified_since', s3_file['last_modified'].isoformat())
+        #LOGGER.info('ESTE ES EL STATE')
+        #LOGGER.info(state)
         singer.write_state(state)
 
     LOGGER.info('Wrote %s records for table "%s".', records_streamed, table_name)
@@ -44,10 +47,10 @@ def sync_table_file(config, s3_path, stream):
     records_synced = 0
 
     for row in iterator:
+        
         custom_columns = {
             '_sdc_source_bucket': bucket,
             '_sdc_source_file': s3_path,
-
             # index zero, +1 for header row
             '_sdc_source_lineno': records_synced + 2
         }
@@ -56,7 +59,52 @@ def sync_table_file(config, s3_path, stream):
         with Transformer() as transformer:
             to_write = transformer.transform(rec, stream['schema'], metadata.to_map(stream['metadata']))
 
-        singer.write_record(table_name, to_write)
+        #prueba = {key: format(value) for key,value in to_write.items()} #esto fue lo que funciono primeramente
+        
+        prueba = to_write.copy()
+        
+        for key, value in to_write.items():
+            try:
+                pruebaT = is_float(stream['schema']['properties'][key]['type'])
+            except:
+                pruebaT = is_float(stream['schema']['properties'][key]['anyOf'][0]['type'])
+
+            if pruebaT:
+                if type(value) is str:
+                    if value == '':
+                        try:
+                            prueba[key] = float(value)
+                        except ValueError:
+                            prueba[key] = '0'
+                    else:
+                        prueba[key] = value            
+            else:
+                prueba[key] = str(value)
+
+        '''
+        for k in to_write:
+            if type(to_write[k]) == int:
+                to_write[k] = format(to_write[k])
+            elif type(to_write[k]) is str:
+                if to_write[k] == '':
+                    try:
+                        to_write[k] = float(to_write[k])
+                    except ValueError:
+                        to_write[k] = '0'
+                else:
+                    to_write[k] = to_write[k]
+            else:
+                to_write[k] = to_write[k]
+        '''
+        #LOGGER.info('AQUI ESTA TO WRITE')
+        #LOGGER.info(to_write)
+        singer.write_record(table_name, prueba)
         records_synced += 1
 
     return records_synced
+
+def is_float(types):
+    
+    for type in types:
+        if type == 'number':
+            return True
