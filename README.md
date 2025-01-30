@@ -36,3 +36,14 @@ used by boto will also need access to the S3 bucket configured in the above conf
 ---
 
 Copyright &copy; 2018 Stitch
+
+---
+
+### Run the Tap with Meltano
+All of the required changes to run the Tap with [Meltano](https://meltano.com/product/) are in the most recent commit of the `run with meltano` branch.
+
+#### Functionality Limitations
+The version of the Tap in the `run with meltano` branch does not have the capability to select or exclude specific streams from the source. 
+
+#### Meltano Details
+Follow [this tutorial](https://docs.meltano.com/getting-started/) for instructions on how to install and run Meltano
