@@ -22,7 +22,8 @@ def do_discover(config):
 
 
 def stream_is_selected(mdata):
-    return mdata.get((), {}).get('selected', False)
+    # Select broken in current implementation. Not needed since we want to get all objects from S3 (our object filtering is at the DDS level)
+    return True # mdata.get((), {}).get('selected', False)
 
 
 def do_sync(config, catalog, state):
@@ -61,8 +62,12 @@ def main():
 
     if args.discover:
         do_discover(args.config)
-    elif args.properties:
-        do_sync(config, args.properties, args.state)
+    else:
+        streams = discover_streams(config)
+        if not streams:
+            raise Exception("No streams found")
+        catalog = {"streams": streams}
+        do_sync(config, catalog, args.state)
 
 
 if __name__ == '__main__':
