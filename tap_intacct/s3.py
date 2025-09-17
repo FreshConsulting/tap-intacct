@@ -1,4 +1,5 @@
 import backoff
+import functools
 import boto3
 import re
 import singer
@@ -7,7 +8,8 @@ from botocore.credentials import (
     AssumeRoleCredentialFetcher,
     CredentialResolver,
     DeferredRefreshableCredentials,
-    JSONFileCache
+    JSONFileCache,
+    RefreshableCredentials
 )
 from botocore.exceptions import ClientError
 from botocore.session import Session
@@ -21,12 +23,16 @@ SDC_SOURCE_BUCKET_COLUMN = "_sdc_source_bucket"
 SDC_SOURCE_FILE_COLUMN = "_sdc_source_file"
 SDC_SOURCE_LINENO_COLUMN = "_sdc_source_lineno"
 
-def retry_pattern():
-    return backoff.on_exception(backoff.expo,
-                                ClientError,
-                                max_tries=5,
-                                on_backoff=log_backoff_attempt,
-                                factor=10)
+def retry_pattern(fnc):
+    @backoff.on_exception(backoff.expo,
+                          ClientError,
+                          max_tries=5,
+                          on_backoff=log_backoff_attempt,
+                          factor=10)
+    @functools.wraps(fnc)
+    def wrapper(*args, **kwargs):
+        return fnc(*args, **kwargs)
+    return wrapper
 
 
 def log_backoff_attempt(details):
@@ -47,7 +53,7 @@ class AssumeRoleProvider():
 
 
 
-@retry_pattern()
+@retry_pattern
 def setup_aws_client(config):
     role_arn = "arn:aws:iam::{}:role/{}".format(config['account_id'].replace('-', ''),
                                                 config['role_name'])
@@ -72,6 +78,64 @@ def setup_aws_client(config):
 
     LOGGER.info("Attempting to assume_role on RoleArn: %s", role_arn)
     boto3.setup_default_session(botocore_session=refreshable_session)
+
+@retry_pattern
+def setup_aws_client_with_proxy(config):
+    proxy_role_arn = "arn:aws:iam::{}:role/{}".format(config['proxy_account_id'].replace('-', ''),
+                                                          config['proxy_role_name'])
+    cust_role_arn = "arn:aws:iam::{}:role/{}".format(config['account_id'].replace('-', ''), config['role_name'])
+    credentials_cache_path = config.get("credentials_cache_path", JSONFileCache.CACHE_DIR)
+
+    # Step 1: Assume Role in Account Proxy and set up refreshable session
+    session_proxy = Session()
+    fetcher_proxy = AssumeRoleCredentialFetcher(
+        client_creator=session_proxy.create_client,
+        source_credentials=session_proxy.get_credentials(),
+        role_arn=proxy_role_arn,
+        extra_args={
+            'DurationSeconds': 3600,
+            'RoleSessionName': 'ProxySession'
+        },
+        cache=JSONFileCache(credentials_cache_path)
+    )
+
+    # Refreshable credentials for Account Proxy
+    refreshable_credentials_proxy = RefreshableCredentials.create_from_metadata(
+        metadata=fetcher_proxy.fetch_credentials(),
+        refresh_using=fetcher_proxy.fetch_credentials,
+        method="sts-assume-role"
+    )
+
+    # Step 2: Use Proxy Account's session to assume Role in Customer Account
+    session_cust = Session()
+    fetcher_cust = AssumeRoleCredentialFetcher(
+        client_creator=session_cust.create_client,
+        source_credentials=refreshable_credentials_proxy,
+        role_arn=cust_role_arn,
+        extra_args={
+            'DurationSeconds': 3600,
+            'RoleSessionName': 'TapS3CSVCustSession',
+            'ExternalId': config['external_id']
+        },
+        cache=JSONFileCache(credentials_cache_path)
+    )
+
+    # Create RefreshableCredentials for Customer Account
+    refreshable_credentials_cust = RefreshableCredentials.create_from_metadata(
+        metadata=fetcher_cust.fetch_credentials(),
+        refresh_using=fetcher_cust.fetch_credentials,
+        method="sts-assume-role"
+    )
+    session_cust._credentials = refreshable_credentials_cust
+
+    # Set up refreshable session for Customer Account
+    session_cust.register_component(
+        'credential_provider',
+        CredentialResolver([AssumeRoleProvider(fetcher_cust)])
+    )
+
+    LOGGER.info("Attempting to assume_role on RoleArn: %s", cust_role_arn)
+    boto3.setup_default_session(botocore_session=session_cust)
 
 def get_exported_tables(bucket, company_id, path=None):
     prefix = str.join('/', [path, company_id]) if path else company_id

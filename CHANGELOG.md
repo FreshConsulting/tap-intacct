@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.0
+ * Adds proxy AWS Account support [#13](https://github.com/singer-io/tap-intacct/pull/13)
+ * Update libraries 
+
 ## 1.0.3
  * Updated the regex pattern in s3.py to fetch filename_*.csv [#11](https://github.com/singer-io/tap-intacct/pull/11)
 
