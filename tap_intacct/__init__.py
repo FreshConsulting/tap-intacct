@@ -7,6 +7,8 @@ from tap_intacct.discover import discover_streams
 from tap_intacct.sync import sync_stream
 from tap_intacct import s3
 
+from tap_intacct.fix_catalogs import process_catalog
+
 LOGGER = singer.get_logger()
 
 REQUIRED_CONFIG_KEYS = ["start_date", "bucket", "company_id"]
@@ -27,6 +29,14 @@ def stream_is_selected(mdata):
 
 def do_sync(config, catalog, state):
     LOGGER.info('Starting sync.')
+
+    if config.get("fix_catalog", False) :
+        LOGGER.info('Fixing catalog data types and keys.')
+
+        with open(config.get("fix_data_path", {})) as f:
+            fix_data = json.load(f)
+
+        catalog['streams'] = process_catalog(catalog['streams'], fix_data)
 
     for stream in catalog['streams']:
         stream_name = stream['tap_stream_id']
@@ -57,7 +67,13 @@ def main():
             break
         LOGGER.warning("I have direct access to the bucket without assuming the configured role.")
     except:
-        s3.setup_aws_client(config)
+        # Check if proxy_account_id and proxy_role_name are in config
+        if 'proxy_account_id' in config and 'proxy_role_name' in config:
+            # If both are present, call setup_aws_client_with_proxy
+            s3.setup_aws_client_with_proxy(config)
+        else:
+            # Otherwise, call setup_aws_client
+            s3.setup_aws_client(config)
 
     if args.discover:
         do_discover(args.config)
