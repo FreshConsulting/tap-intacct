@@ -45,3 +45,29 @@ used by boto will also need access to the S3 bucket configured in the above conf
 ---
 
 Copyright &copy; 2018 Stitch
+
+---
+
+### Run the Tap with Meltano
+All of the required changes to run the Tap with [Meltano](https://meltano.com/product/) are in the most recent commit of the `run with meltano` branch.
+
+To add the Tap to a Meltano pipeline, add this block of code to the "extractors" section of you `meltano.yml` file with the required values: 
+
+```
+- name: tap-intacct
+    namespace: tap_intacct
+    pip_url: git+https://github.com/FreshConsulting/tap-intacct.git@run-with-meltano
+    executable: tap-intacct
+    config:
+      start_date: <desired start date> # ex: '2025-01-01T00:00:00Z'
+      bucket: <S3 Bucket to Target>
+      company_id: <AWS Company ID>
+      role_name: <Name of the Role to Impersonate>
+      account_id: <AWS Account ID>
+      external_id: <AWS External ID>
+```
+#### Functionality Limitations
+The version of the Tap in the `run with meltano` branch does not have the capability to select or exclude specific streams from the source. 
+
+#### Meltano Details
+Follow [this tutorial](https://docs.meltano.com/getting-started/) for instructions on how to install and run Meltano
